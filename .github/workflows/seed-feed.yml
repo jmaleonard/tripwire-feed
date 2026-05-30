@@ -41,15 +41,25 @@ jobs:
           PUBLISH_DATE: ${{ github.event.inputs.date }}
         run: node scripts/publish-feed.mjs
 
-      - name: Publish full snapshot (release asset)
+      - name: Publish full snapshot (release assets)
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           gh release view feed >/dev/null 2>&1 \
             || gh release create feed --title "IoC feed" \
-                 --notes "Rolling full IoC snapshot. See feed/v1/manifest.json."
-          gh release upload feed "$GITHUB_WORKSPACE/feed-out/latest.json" --clobber
+                 --notes "Full IoC snapshots (snapshot-<date>.json). See feed/v1/manifest.json."
+          # Upload the date-stamped snapshot (manifest points here) + the
+          # latest.json human mirror. The dated name is never reused, so its CDN
+          # URL is always fresh.
+          gh release upload feed "$GITHUB_WORKSPACE"/feed-out/*.json --clobber
+          # Prune: keep the 3 newest dated snapshots, delete the rest.
+          gh release view feed --json assets -q '.assets[].name' \
+            | grep '^snapshot-' | sort -r | tail -n +4 \
+            | while read -r asset; do
+                echo "pruning $asset"
+                gh release delete-asset feed "$asset" --yes
+              done
 
       - name: Commit delta + manifest
         env:

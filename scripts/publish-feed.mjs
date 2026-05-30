@@ -314,17 +314,19 @@ function loadConfig(env = process.env) {
   const tag = env.FEED_TAG || "feed";
   const feedDir = env.FEED_DIR || join(process.cwd(), "feed-repo");
   const feedV1 = join(feedDir, "feed", "v1");
+  const date = env.PUBLISH_DATE || (/* @__PURE__ */ new Date()).toISOString().slice(0, 10);
+  const snapshotName = `snapshot-${date}.json`;
   return {
     repo,
-    date: env.PUBLISH_DATE || (/* @__PURE__ */ new Date()).toISOString().slice(0, 10),
-    // empty -> today
+    date,
+    snapshotName,
     keepDeltas: Number(env.KEEP_DELTAS || 30),
     outDir: env.OUT_DIR || join(process.cwd(), "feed-out"),
     feedV1,
     manifestPath: join(feedV1, "manifest.json"),
-    fullUrl: `https://github.com/${repo}/releases/download/${tag}/latest.json`,
-    deltaUrl: (date) => `https://raw.githubusercontent.com/${repo}/main/feed/v1/delta-${date}.json`,
-    deltaPath: (date) => join(feedV1, `delta-${date}.json`)
+    fullUrl: `https://github.com/${repo}/releases/download/${tag}/${snapshotName}`,
+    deltaUrl: (date2) => `https://raw.githubusercontent.com/${repo}/main/feed/v1/delta-${date2}.json`,
+    deltaPath: (date2) => join(feedV1, `delta-${date2}.json`)
   };
 }
 async function fetchJson(url) {
@@ -351,7 +353,7 @@ async function loadPrevious(cfg) {
     return { prevManifest: null, prevEntries: [] };
   }
   const prevManifest = parseManifest(manifestJson);
-  const snapshotJson = await fetchJson(cfg.fullUrl);
+  const snapshotJson = await fetchJson(prevManifest.full.url);
   const prevEntries = snapshotJson ? parseSnapshot(snapshotJson).entries : [];
   log(`previous snapshot: ${prevEntries.length} IoCs`);
   return { prevManifest, prevEntries };
@@ -359,6 +361,7 @@ async function loadPrevious(cfg) {
 function writeOutputs(cfg, plan) {
   mkdirSync(cfg.outDir, { recursive: true });
   mkdirSync(cfg.feedV1, { recursive: true });
+  writeFileSync(join(cfg.outDir, cfg.snapshotName), plan.snapshotBody);
   writeFileSync(join(cfg.outDir, "latest.json"), plan.snapshotBody);
   writeFileSync(cfg.manifestPath, plan.manifestBody);
   if (plan.deltaBody) {

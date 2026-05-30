@@ -9,19 +9,23 @@ no AWS.
 
 ```
 Release `feed` tag:
-  latest.json              full snapshot (today)        ← release asset (CDN, no repo bloat)
+  snapshot-YYYY-MM-DD.json   full snapshot, 3 newest retained ← release asset (manifest points here)
+  latest.json                clobbered mirror of newest        ← human convenience only
 
 feed/v1/:
-  manifest.json            index clients read first
-  delta-YYYY-MM-DD.json    daily diff, last 30 retained ← committed (small, audit trail)
+  manifest.json              index clients read first
+  delta-YYYY-MM-DD.json      daily diff, last 30 retained      ← committed (small, audit trail)
 ```
+
+The snapshot is date-stamped (never a reused filename), so its CDN URL is always
+fresh — clobbering one `latest.json` would let Fastly serve a stale copy.
 
 ### Consume
 
 ```bash
-# the index
+# the index — start here; it points at the current snapshot + deltas
 curl -s https://raw.githubusercontent.com/jmaleonard/tripwire-feed/main/feed/v1/manifest.json
-# the full snapshot
+# newest full snapshot (mirror; clients follow manifest.full.url instead)
 curl -sL https://github.com/jmaleonard/tripwire-feed/releases/download/feed/latest.json
 ```
 
