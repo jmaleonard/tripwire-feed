@@ -1,0 +1,67 @@
+name: Seed IoC feed
+
+# Daily IoC feed publisher. Self-contained: runs a bundled script (no install)
+# and publishes to THIS repo using the built-in GITHUB_TOKEN — no PAT needed.
+#
+#   - full snapshot  -> release asset on the `feed` tag (latest.json)
+#   - delta + manifest -> committed under feed/v1/
+#
+# Source of truth for scripts/publish-feed.mjs lives in jmaleonard/agent-tripwire
+# (packages/feeds + scripts/publish-feed.mjs); regenerate the bundle with:
+#   npx esbuild scripts/publish-feed.mjs --bundle --platform=node --format=esm \
+#     --outfile=<this-repo>/scripts/publish-feed.mjs
+
+on:
+  schedule:
+    - cron: '0 6 * * *' # 06:00 UTC daily
+  workflow_dispatch:
+    inputs:
+      date:
+        description: 'Override publish date (YYYY-MM-DD)'
+        required: false
+
+permissions:
+  contents: write
+
+jobs:
+  seed:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Build snapshot + delta + manifest
+        env:
+          FEED_REPO: ${{ github.repository }}
+          FEED_DIR: ${{ github.workspace }}
+          FEED_TAG: feed
+          OUT_DIR: ${{ github.workspace }}/feed-out
+          PUBLISH_DATE: ${{ github.event.inputs.date }}
+        run: node scripts/publish-feed.mjs
+
+      - name: Publish full snapshot (release asset)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh release view feed >/dev/null 2>&1 \
+            || gh release create feed --title "IoC feed" \
+                 --notes "Rolling full IoC snapshot. See feed/v1/manifest.json."
+          gh release upload feed "$GITHUB_WORKSPACE/feed-out/latest.json" --clobber
+
+      - name: Commit delta + manifest
+        env:
+          PUBLISH_DATE: ${{ github.event.inputs.date }}
+        run: |
+          set -euo pipefail
+          git config user.name  "tripwire-feed-bot"
+          git config user.email "noreply@github.com"
+          git add -A feed/v1
+          if git diff --cached --quiet; then
+            echo "No manifest/delta changes to commit."
+          else
+            git commit -m "feed: publish ${PUBLISH_DATE:-$(date -u +%F)}"
+            git push
+          fi
