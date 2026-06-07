@@ -1,5 +1,5 @@
 // scripts/build-site.mjs
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, writeFileSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
 // packages/feeds/dist/delta.js
@@ -276,14 +276,25 @@ async function fetchText(url) {
   if (!res.ok) throw new Error(`GET ${url} \u2192 HTTP ${res.status}`);
   return res.text();
 }
+var SNAPSHOT_FILE = process.env.SNAPSHOT_FILE || "";
 async function main() {
-  log(`manifest: ${MANIFEST_URL}`);
-  const manifest = parseManifest(JSON.parse(await fetchText(MANIFEST_URL)));
-  log(`snapshot: ${manifest.full.url}`);
-  const body = await fetchText(manifest.full.url);
-  const actual = sha256Hex(body);
-  if (actual !== manifest.full.sha256) {
-    throw new Error(`snapshot integrity check failed: ${actual} != ${manifest.full.sha256}`);
+  let body;
+  if (SNAPSHOT_FILE) {
+    // Local mode: consume the snapshot the publisher just built (passed as a
+    // workflow artifact). Avoids the GitHub release CDN, whose cache lags the
+    // freshly re-clobbered asset and breaks the integrity check on same-day
+    // re-runs. The local file is the authoritative source, so no hash check.
+    log(`snapshot (local): ${SNAPSHOT_FILE}`);
+    body = readFileSync(SNAPSHOT_FILE, "utf-8");
+  } else {
+    log(`manifest: ${MANIFEST_URL}`);
+    const manifest = parseManifest(JSON.parse(await fetchText(MANIFEST_URL)));
+    log(`snapshot: ${manifest.full.url}`);
+    body = await fetchText(manifest.full.url);
+    const actual = sha256Hex(body);
+    if (actual !== manifest.full.sha256) {
+      throw new Error(`snapshot integrity check failed: ${actual} != ${manifest.full.sha256}`);
+    }
   }
   const snapshot = parseSnapshot(JSON.parse(body));
   const report = computeTopOffenders(snapshot.entries);

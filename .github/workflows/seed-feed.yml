@@ -48,6 +48,16 @@ jobs:
           PUBLISH_DATE: ${{ github.event.inputs.date }}
         run: node scripts/publish-feed.mjs
 
+      # Hand the freshly-built snapshot to the pages job directly, so it never
+      # has to re-download via the release CDN (whose cache lags the clobbered
+      # asset and intermittently fails build-site's integrity check).
+      - name: Upload snapshot for pages job
+        uses: actions/upload-artifact@v4
+        with:
+          name: feed-snapshot
+          path: ${{ github.workspace }}/feed-out/latest.json
+          retention-days: 1
+
       - name: Publish full snapshot (release assets)
         env:
           GH_TOKEN: ${{ github.token }}
@@ -100,9 +110,15 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
+      - name: Download snapshot from seed job
+        uses: actions/download-artifact@v4
+        with:
+          name: feed-snapshot
+          path: ${{ github.workspace }}/feed-in
       - name: Build the top-offenders page
         env:
           SITE_DIR: ${{ github.workspace }}/site
+          SNAPSHOT_FILE: ${{ github.workspace }}/feed-in/latest.json
         run: node scripts/build-site.mjs
       - uses: actions/configure-pages@v5
         with:
