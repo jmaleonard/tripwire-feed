@@ -1,15 +1,20 @@
 name: Seed IoC feed
 
-# Daily IoC feed publisher. Self-contained: runs a bundled script (no install)
-# and publishes to THIS repo using the built-in GITHUB_TOKEN — no PAT needed.
+# Daily IoC feed publisher + public top-offenders page. Self-contained: runs
+# bundled scripts (no install) and publishes to THIS repo using the built-in
+# GITHUB_TOKEN — no PAT needed.
 #
-#   - full snapshot  -> release asset on the `feed` tag (latest.json)
-#   - delta + manifest -> committed under feed/v1/
+#   - full snapshot      -> release asset on the `feed` tag
+#   - delta + manifest   -> committed under feed/v1/
+#   - top-offenders page -> GitHub Pages (site/)
 #
-# Source of truth for scripts/publish-feed.mjs lives in jmaleonard/agent-tripwire
-# (packages/feeds + scripts/publish-feed.mjs); regenerate the bundle with:
+# Source of truth for scripts/*.mjs lives in jmaleonard/agent-tripwire
+# (packages/feeds + scripts/{publish-feed,build-site}.mjs); regenerate the
+# bundles with:
 #   npx esbuild scripts/publish-feed.mjs --bundle --platform=node --format=esm \
 #     --outfile=<this-repo>/scripts/publish-feed.mjs
+#   npx esbuild scripts/build-site.mjs   --bundle --platform=node --format=esm \
+#     --outfile=<this-repo>/scripts/build-site.mjs
 
 on:
   schedule:
@@ -22,6 +27,8 @@ on:
 
 permissions:
   contents: write
+  pages: write
+  id-token: write
 
 jobs:
   seed:
@@ -75,3 +82,33 @@ jobs:
             git commit -m "feed: publish ${PUBLISH_DATE:-$(date -u +%F)}"
             git push
           fi
+
+  # Build the public "top offenders" page from the just-published feed and
+  # deploy it to GitHub Pages. build-site.mjs is a self-contained bundle of
+  # jmaleonard/agent-tripwire's scripts/build-site.mjs.
+  pages:
+    needs: seed
+    runs-on: ubuntu-22.04
+    concurrency:
+      group: pages
+      cancel-in-progress: false
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Build the top-offenders page
+        env:
+          SITE_DIR: ${{ github.workspace }}/site
+        run: node scripts/build-site.mjs
+      - uses: actions/configure-pages@v5
+        with:
+          enablement: true
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+      - id: deploy
+        uses: actions/deploy-pages@v4
