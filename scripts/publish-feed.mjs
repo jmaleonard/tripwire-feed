@@ -59,6 +59,100 @@ var AikidoFeed = class {
   }
 };
 
+// packages/feeds/dist/ghsa.js
+var GHSA_ADVISORIES_URL = "https://api.github.com/advisories";
+var ECOSYSTEMS = [
+  { slug: "npm", ecosystem: "npm" },
+  { slug: "pip", ecosystem: "pypi" }
+];
+var GhsaFeed = class {
+  id = "ghsa";
+  token;
+  fetchImpl;
+  baseUrl;
+  maxPages;
+  constructor(opts = {}) {
+    this.token = opts.token;
+    this.fetchImpl = opts.fetchImpl ?? fetch;
+    this.baseUrl = opts.baseUrl ?? GHSA_ADVISORIES_URL;
+    this.maxPages = opts.maxPages ?? 100;
+  }
+  headers() {
+    const h = {
+      Accept: "application/vnd.github+json",
+      "X-GitHub-Api-Version": "2022-11-28",
+      "User-Agent": "tripwire-feed"
+    };
+    if (this.token)
+      h.Authorization = `Bearer ${this.token}`;
+    return h;
+  }
+  async *refresh(opts = {}) {
+    const fetchImpl = opts.fetch ?? this.fetchImpl;
+    const now = (/* @__PURE__ */ new Date()).toISOString();
+    for (const { slug, ecosystem } of ECOSYSTEMS) {
+      let url = `${this.baseUrl}?type=malware&ecosystem=${slug}&per_page=100`;
+      let pages = 0;
+      while (url && pages < this.maxPages) {
+        const res = await fetchImpl(url, {
+          headers: this.headers(),
+          ...opts.signal ? { signal: opts.signal } : {}
+        });
+        if (!res.ok) {
+          throw new Error(`GHSA advisories ${url} returned HTTP ${res.status}`);
+        }
+        const data = await res.json();
+        if (!Array.isArray(data)) {
+          throw new Error(`GHSA advisories ${url} did not return an array`);
+        }
+        for (const adv of data) {
+          const seen = adv.published_at ?? now;
+          for (const vuln of adv.vulnerabilities ?? []) {
+            if (!vuln.package || vuln.package.ecosystem !== slug)
+              continue;
+            yield {
+              ecosystem,
+              package: vuln.package.name,
+              version_spec: normalizeRange(vuln.vulnerable_version_range),
+              sources: [{ name: "ghsa", metadata: { id: adv.ghsa_id } }],
+              first_seen: seen,
+              last_seen: seen
+            };
+          }
+        }
+        url = nextLink(res.headers.get("link"));
+        pages++;
+      }
+    }
+  }
+  async healthCheck() {
+    const lastChecked = (/* @__PURE__ */ new Date()).toISOString();
+    try {
+      const res = await this.fetchImpl(`${this.baseUrl}?type=malware&ecosystem=npm&per_page=1`, {
+        headers: this.headers()
+      });
+      return res.ok ? { ok: true, lastChecked } : { ok: false, message: `HTTP ${res.status}`, lastChecked };
+    } catch (err) {
+      return { ok: false, message: err.message, lastChecked };
+    }
+  }
+};
+function normalizeRange(range) {
+  if (!range || range.trim() === ">= 0")
+    return "*";
+  return range.trim();
+}
+function nextLink(link) {
+  if (!link)
+    return null;
+  for (const part of link.split(",")) {
+    const m = part.match(/<([^>]+)>\s*;\s*rel="next"/);
+    if (m)
+      return m[1] ?? null;
+  }
+  return null;
+}
+
 // packages/feeds/dist/merger.js
 function mergeFeeds(entries) {
   const map = /* @__PURE__ */ new Map();
@@ -339,7 +433,12 @@ function readJson(path) {
   return existsSync(path) ? JSON.parse(readFileSync(path, "utf-8")) : null;
 }
 async function seedToday() {
-  const seed = await runSeeder([new AikidoFeed()]);
+  const seed = await runSeeder([
+    new AikidoFeed(),
+    // GITHUB_TOKEN lifts the advisories API from 60/hr to 5000/hr; the malware
+    // corpus needs it. A failing source is logged but won't abort the run.
+    new GhsaFeed({ token: process.env.GITHUB_TOKEN })
+  ]);
   if (!seed.sourceStats.some((s) => s.ok)) {
     throw new Error(`all feed sources failed: ${JSON.stringify(seed.sourceStats)}`);
   }
