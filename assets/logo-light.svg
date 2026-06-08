@@ -1,5 +1,5 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 440 140" role="img" aria-label="tripwire">
-  <title>tripwire</title>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 540 140" role="img" aria-label="tripwire feed">
+  <title>tripwire feed</title>
   <!-- shield -->
   <path d="M26 24 Q26 20 30 20 L98 20 Q102 20 102 24 L102 64 C102 94 86 116 64 128 C42 116 26 94 26 64 Z"
         fill="#1f2328" fill-opacity="0.05" stroke="#1f2328" stroke-width="5" stroke-linejoin="round"/>
@@ -17,6 +17,6 @@
   <!-- wordmark -->
   <text x="142" y="90" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace"
         font-size="52" font-weight="700" letter-spacing="-1">
-    <tspan fill="#d1242f">trip</tspan><tspan fill="#1f2328">wire</tspan>
+    <tspan fill="#d1242f">trip</tspan><tspan fill="#1f2328">wire</tspan><tspan dx="18" fill="#6e7781" font-size="34" font-weight="500">feed</tspan>
   </text>
 </svg>
