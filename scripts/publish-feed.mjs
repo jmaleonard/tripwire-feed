@@ -59,6 +59,28 @@ var AikidoFeed = class {
   }
 };
 
+// packages/feeds/dist/github.js
+function githubHeaders(token) {
+  const h = {
+    Accept: "application/vnd.github+json",
+    "X-GitHub-Api-Version": "2022-11-28",
+    "User-Agent": "tripwire-feed"
+  };
+  if (token)
+    h.Authorization = `Bearer ${token}`;
+  return h;
+}
+function nextLink(link) {
+  if (!link)
+    return null;
+  for (const part of link.split(",")) {
+    const m = part.match(/<([^>]+)>\s*;\s*rel="next"/);
+    if (m)
+      return m[1] ?? null;
+  }
+  return null;
+}
+
 // packages/feeds/dist/ghsa.js
 var GHSA_ADVISORIES_URL = "https://api.github.com/advisories";
 var ECOSYSTEMS = [
@@ -77,16 +99,6 @@ var GhsaFeed = class {
     this.baseUrl = opts.baseUrl ?? GHSA_ADVISORIES_URL;
     this.maxPages = opts.maxPages ?? 100;
   }
-  headers() {
-    const h = {
-      Accept: "application/vnd.github+json",
-      "X-GitHub-Api-Version": "2022-11-28",
-      "User-Agent": "tripwire-feed"
-    };
-    if (this.token)
-      h.Authorization = `Bearer ${this.token}`;
-    return h;
-  }
   async *refresh(opts = {}) {
     const fetchImpl = opts.fetch ?? this.fetchImpl;
     const now = (/* @__PURE__ */ new Date()).toISOString();
@@ -95,7 +107,7 @@ var GhsaFeed = class {
       let pages = 0;
       while (url && pages < this.maxPages) {
         const res = await fetchImpl(url, {
-          headers: this.headers(),
+          headers: githubHeaders(this.token),
           ...opts.signal ? { signal: opts.signal } : {}
         });
         if (!res.ok) {
@@ -129,7 +141,7 @@ var GhsaFeed = class {
     const lastChecked = (/* @__PURE__ */ new Date()).toISOString();
     try {
       const res = await this.fetchImpl(`${this.baseUrl}?type=malware&ecosystem=npm&per_page=1`, {
-        headers: this.headers()
+        headers: githubHeaders(this.token)
       });
       return res.ok ? { ok: true, lastChecked } : { ok: false, message: `HTTP ${res.status}`, lastChecked };
     } catch (err) {
@@ -142,15 +154,114 @@ function normalizeRange(range) {
     return "*";
   return range.trim();
 }
-function nextLink(link) {
-  if (!link)
-    return null;
-  for (const part of link.split(",")) {
-    const m = part.match(/<([^>]+)>\s*;\s*rel="next"/);
-    if (m)
-      return m[1] ?? null;
+
+// packages/feeds/dist/community.js
+var CommunityFeed = class {
+  id = "community";
+  repo;
+  token;
+  fetchImpl;
+  baseUrl;
+  reportLabel;
+  approvedLabel;
+  ingestedLabel;
+  maxPages;
+  constructor(opts = {}) {
+    this.repo = opts.repo ?? "jmaleonard/tripwire-feed";
+    this.token = opts.token;
+    this.fetchImpl = opts.fetchImpl ?? fetch;
+    this.baseUrl = opts.baseUrl ?? "https://api.github.com";
+    this.reportLabel = opts.reportLabel ?? "ioc-report";
+    this.approvedLabel = opts.approvedLabel ?? "approved";
+    this.ingestedLabel = opts.ingestedLabel ?? "ingested";
+    this.maxPages = opts.maxPages ?? 50;
   }
-  return null;
+  async *refresh(opts = {}) {
+    const fetchImpl = opts.fetch ?? this.fetchImpl;
+    const now = (/* @__PURE__ */ new Date()).toISOString();
+    const labels = `${this.reportLabel},${this.approvedLabel}`;
+    let url = `${this.baseUrl}/repos/${this.repo}/issues?state=open&labels=${encodeURIComponent(labels)}&per_page=100`;
+    let pages = 0;
+    while (url && pages < this.maxPages) {
+      const res = await fetchImpl(url, {
+        headers: githubHeaders(this.token),
+        ...opts.signal ? { signal: opts.signal } : {}
+      });
+      if (!res.ok) {
+        throw new Error(`Community issues ${url} returned HTTP ${res.status}`);
+      }
+      const issues = await res.json();
+      if (!Array.isArray(issues)) {
+        throw new Error(`Community issues ${url} did not return an array`);
+      }
+      for (const issue of issues) {
+        if (issue.pull_request)
+          continue;
+        const names = (issue.labels ?? []).map((l) => typeof l === "string" ? l : l.name);
+        if (names.includes(this.ingestedLabel))
+          continue;
+        const fields = parseIssueForm(issue.body ?? "");
+        const pkg = (fields["Package name"] ?? "").trim();
+        if (!pkg)
+          continue;
+        const seen = issue.created_at ?? now;
+        yield {
+          ecosystem: normalizeEcosystem(fields["Ecosystem"] ?? ""),
+          package: pkg,
+          version_spec: normalizeVersion(fields["Affected version(s)"] ?? ""),
+          sources: [
+            {
+              name: "community-report",
+              metadata: { issue: issue.number, url: issue.html_url }
+            }
+          ],
+          first_seen: seen,
+          last_seen: seen
+        };
+      }
+      url = nextLink(res.headers.get("link"));
+      pages++;
+    }
+  }
+  async healthCheck() {
+    const lastChecked = (/* @__PURE__ */ new Date()).toISOString();
+    try {
+      const res = await this.fetchImpl(`${this.baseUrl}/repos/${this.repo}`, {
+        headers: githubHeaders(this.token)
+      });
+      return res.ok ? { ok: true, lastChecked } : { ok: false, message: `HTTP ${res.status}`, lastChecked };
+    } catch (err) {
+      return { ok: false, message: err.message, lastChecked };
+    }
+  }
+};
+function parseIssueForm(body) {
+  const out = {};
+  for (const part of body.split(/^### /m)) {
+    const nl = part.indexOf("\n");
+    if (nl === -1)
+      continue;
+    const heading = part.slice(0, nl).trim();
+    if (!heading)
+      continue;
+    const value = part.slice(nl + 1).trim();
+    out[heading] = value === "_No response_" ? "" : value;
+  }
+  return out;
+}
+function normalizeEcosystem(s) {
+  const v = s.trim().toLowerCase();
+  if (v === "npm")
+    return "npm";
+  if (v === "pypi" || v === "pip")
+    return "pypi";
+  return "other";
+}
+function normalizeVersion(s) {
+  const v = s.trim();
+  if (!v || v.toLowerCase() === "all" || v === "*")
+    return "*";
+  return v;
 }
 
 // packages/feeds/dist/merger.js
@@ -437,7 +548,11 @@ async function seedToday() {
     new AikidoFeed(),
     // GITHUB_TOKEN lifts the advisories API from 60/hr to 5000/hr; the malware
     // corpus needs it. A failing source is logged but won't abort the run.
-    new GhsaFeed({ token: process.env.GITHUB_TOKEN })
+    new GhsaFeed({ token: process.env.GITHUB_TOKEN }),
+    // Approved community reports (moderated): GitHub issues labeled
+    // ioc-report + approved, not yet ingested. The workflow marks them ingested
+    // after publish so they are not re-added.
+    new CommunityFeed({ repo: process.env.FEED_REPO, token: process.env.GITHUB_TOKEN })
   ]);
   if (!seed.sourceStats.some((s) => s.ok)) {
     throw new Error(`all feed sources failed: ${JSON.stringify(seed.sourceStats)}`);

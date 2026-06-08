@@ -24,20 +24,42 @@ on:
       date:
         description: 'Override publish date (YYYY-MM-DD)'
         required: false
+  # Re-publish the moment a maintainer approves a community report.
+  issues:
+    types: [labeled]
 
 permissions:
   contents: write
   pages: write
   id-token: write
+  issues: write # comment + relabel + close ingested reports
 
 jobs:
   seed:
     runs-on: ubuntu-22.04
+    # Scheduled/manual runs always go; an issue event only triggers a publish
+    # when the label just added is `approved`.
+    if: github.event_name != 'issues' || github.event.label.name == 'approved'
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: 22
+
+      # Snapshot the approved-but-not-yet-ingested reports at job start, so the
+      # close-out step relabels exactly what this run set out to ingest.
+      - name: Collect approved reports
+        id: approved
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          nums=$(gh issue list --repo "$GITHUB_REPOSITORY" \
+            --label ioc-report --label approved --state open \
+            --json number,labels \
+            -q '[.[] | select(any(.labels[].name; . == "ingested") | not) | .number] | join(" ")')
+          echo "issues=$nums" >> "$GITHUB_OUTPUT"
+          echo "approved reports queued: ${nums:-none}"
 
       - name: Build snapshot + delta + manifest
         env:
@@ -95,6 +117,27 @@ jobs:
             git commit -m "feed: publish ${PUBLISH_DATE:-$(date -u +%F)}"
             git push
           fi
+
+      # Close the loop on community reports that just went into the feed: comment,
+      # relabel approved -> ingested (so they're not re-ingested), and close.
+      # Only the issues snapshotted at job start, and only after a successful
+      # publish above.
+      - name: Close out ingested reports
+        if: ${{ steps.approved.outputs.issues != '' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PUBLISH_DATE: ${{ github.event.inputs.date }}
+          ISSUES: ${{ steps.approved.outputs.issues }}
+        run: |
+          set -euo pipefail
+          date="${PUBLISH_DATE:-$(date -u +%F)}"
+          for n in $ISSUES; do
+            echo "closing out report #$n"
+            gh issue comment "$n" --repo "$GITHUB_REPOSITORY" \
+              --body "✅ Added to the feed (snapshot $date) as a \`community-report\` source. Thanks for the report!"
+            gh issue edit "$n" --repo "$GITHUB_REPOSITORY" --add-label ingested --remove-label approved
+            gh issue close "$n" --repo "$GITHUB_REPOSITORY"
+          done
 
   # Build the public "top offenders" page from the just-published feed and
   # deploy it to GitHub Pages. build-site.mjs is a self-contained bundle of
