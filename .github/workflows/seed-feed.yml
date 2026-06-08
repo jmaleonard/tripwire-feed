@@ -46,6 +46,9 @@ jobs:
           FEED_TAG: feed
           OUT_DIR: ${{ github.workspace }}/feed-out
           PUBLISH_DATE: ${{ github.event.inputs.date }}
+          # Lifts the GitHub Advisory Database source from 60/hr to 5000/hr;
+          # the malware corpus needs it. Public data — read-only use of the token.
+          GITHUB_TOKEN: ${{ github.token }}
         run: node scripts/publish-feed.mjs
 
       # Hand the freshly-built snapshot to the pages job directly, so it never
