@@ -1,0 +1,53 @@
+name: Report a malicious package
+description: Report a package you believe is malicious (supply-chain indicator of compromise).
+title: "[report] "
+labels: ["ioc-report"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting. Submissions are **reviewed before they enter the feed** —
+        nothing you submit is published automatically. Detection-only awareness, not an
+        accusation of any maintainer.
+  - type: input
+    id: package
+    attributes:
+      label: Package name
+      description: Exact registry name.
+      placeholder: e.g. evil-pkg
+    validations:
+      required: true
+  - type: dropdown
+    id: ecosystem
+    attributes:
+      label: Ecosystem
+      options:
+        - npm
+        - pypi
+        - other
+    validations:
+      required: true
+  - type: input
+    id: versions
+    attributes:
+      label: Affected version(s)
+      description: A range, a list, or "all" if unknown.
+      placeholder: e.g. 1.2.0 - 1.4.1, or all
+    validations:
+      required: true
+  - type: input
+    id: evidence
+    attributes:
+      label: Evidence link
+      description: Advisory, registry page, gist, or write-up that supports the report.
+      placeholder: https://...
+  - type: textarea
+    id: details
+    attributes:
+      label: What did you observe?
+      description: Behaviour, payload, install hooks, exfil endpoints, how you found it.
+  - type: input
+    id: contact
+    attributes:
+      label: Contact (optional)
+      description: Email or handle if you're open to follow-up. Left public on the issue.

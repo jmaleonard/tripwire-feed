@@ -1,0 +1,5 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Top-offenders feed (read-only)
+    url: https://jmaleonard.github.io/tripwire-feed/
+    about: Browse the packages currently on the feed before reporting.

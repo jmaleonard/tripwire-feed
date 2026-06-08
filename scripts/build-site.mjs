@@ -187,6 +187,11 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
 .muted { color: #8b949e; }
 footer { margin-top: 3rem; color: #8b949e; font-size: .85rem; }
 .empty { color: #8b949e; font-style: italic; }
+.btn { display: inline-block; margin: .5rem 0 0; padding: .45rem .8rem; border: 1px solid #f85149;
+  border-radius: 6px; color: #ff7b72; text-decoration: none; font-weight: 600; }
+.btn:hover { background: #f8514922; }
+a.report { color: #8b949e; text-decoration: none; }
+a.report:hover { color: #58a6ff; text-decoration: underline; }
 </style>
 </head>
 <body>
@@ -194,6 +199,7 @@ footer { margin-top: 3rem; color: #8b949e; font-size: .85rem; }
   <h1>tripwire \xB7 top offenders</h1>
   <p class="sub">Packages on the public malware feed tripwire enriches events against.
   Detection-only awareness \u2014 not an accusation of any maintainer.</p>
+  <p><a class="btn" href="${esc(reportUrl())}">\u26a0\ufe0f Report a malicious package</a></p>
 
   <div class="stats">
     <span><b>${fmtInt(report.totalPackages)}</b> packages</span>
@@ -232,10 +238,11 @@ function entriesTable(rows, dateLabel) {
       <td><span class="src">${r.sources.map(esc).join(", ") || "\u2014"}</span></td>
       <td>${r.campaign ? `<span class="camp">${esc(r.campaign)}</span>` : '<span class="muted">\u2014</span>'}</td>
       <td class="muted">${esc(dateOnly(dateLabel === "first seen" ? r.firstSeen : r.lastSeen))}</td>
+      <td><a class="report" href="${esc(reportUrl(r.package, r.ecosystem))}" title="Report this package">report</a></td>
     </tr>`).join("\n");
   return `<table>
     <thead><tr>
-      <th>package</th><th class="num">versions</th><th>sources</th><th>campaign</th><th>${esc(dateLabel)}</th>
+      <th>package</th><th class="num">versions</th><th>sources</th><th>campaign</th><th>${esc(dateLabel)}</th><th></th>
     </tr></thead>
     <tbody>${body}</tbody>
   </table>`;
@@ -271,6 +278,16 @@ var log = (msg) => console.log(`[build-site] ${msg}`);
 var MANIFEST_URL = process.env.MANIFEST_URL || "https://raw.githubusercontent.com/jmaleonard/tripwire-feed/main/feed/v1/manifest.json";
 var SITE_DIR = process.env.SITE_DIR || join(process.cwd(), "site");
 var PROJECT_URL = process.env.PROJECT_URL || "https://github.com/jmaleonard/agent-tripwire";
+var REPORT_BASE = process.env.REPORT_BASE || "https://github.com/jmaleonard/tripwire-feed/issues/new";
+function reportUrl(pkg, eco) {
+  const params = new URLSearchParams({ template: "report-malicious-package.yml" });
+  if (pkg) {
+    params.set("title", `[report] ${pkg}`);
+    params.set("package", pkg);
+  }
+  if (eco) params.set("ecosystem", eco);
+  return `${REPORT_BASE}?${params.toString()}`;
+}
 async function fetchText(url) {
   const res = await fetch(url);
   if (!res.ok) throw new Error(`GET ${url} \u2192 HTTP ${res.status}`);
